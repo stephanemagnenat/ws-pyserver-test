@@ -20,8 +20,9 @@ class Player:
 	def __init__(self, name):
 		self.name = name
 		self.pos = np.ones(2) * WORLD_SIZE / 2
-		self.hp = MAX_HP
+		self.hits = 0
 		self.speed = np.zeros(2)
+		self.last_fire_time = time.time()
 
 	def move(self, speed):
 		self.speed = np.array(speed)
@@ -46,18 +47,31 @@ UPDATE_PERIOD = 0.05
 
 WORLD_SIZE = 200
 
-MAX_HP = 20
-ATTACK_STRENGTH = 1
+TIME_BETWEEN_FIRE = 1
+
+DIST_TO_HIT = 20
 
 # network processing methods
 
 ## message building
 
 def message_player_new(player):
-	return json.dumps({'type': 'player_new', 'name': player.name, 'pos': player.pos.tolist(), 'speed': player.speed.tolist()})
+	return json.dumps({
+		'type': 'player_new',
+		'name': player.name,
+		'pos': player.pos.tolist(),
+		'speed': player.speed.tolist(),
+		'hits': player.hits
+	})
 
 def message_player_status(player):
-	return json.dumps({'type': 'player_state', 'name': player.name, 'pos': player.pos.tolist(), 'speed': player.speed.tolist()})
+	return json.dumps({
+		'type': 'player_state',
+		'name': player.name,
+		'pos': player.pos.tolist(),
+		'speed': player.speed.tolist(),
+		'hits': player.hits
+	})
 
 def message_player_part(player):
 	return json.dumps({'type': 'player_part', 'name': player.name})
@@ -104,8 +118,30 @@ async def process_client(websocket, path):
 		async for message in websocket:
 			data = json.loads(message)
 			if data['action'] == 'move':
+				# set the speed of the player
 				player.move(data['speed'])
 				await notify_players(player, message_player_status)
+			elif data['action'] == 'fire':
+				cur_time = time.time()
+				if cur_time - player.last_fire_time < TIME_BETWEEN_FIRE:
+					# we are not allowed to fire
+					continue
+				# see if any other player has been hit
+				did_hit = False
+				for other_websocket, other_player in players.items():
+					if other_player == player:
+						continue
+					# if we hit the other
+					if np.linalg.norm(other_player.pos - player.pos) < DIST_TO_HIT:
+						did_hit = True
+						# increase our hits
+						player.hits += 1
+						# disable fire for other
+						other_player.last_fire_time = cur_time
+				# if we did hit, update the client
+				if did_hit:
+					await notify_players(player, message_player_status)
+				player.last_fire_time = cur_time
 			else:
 				logging.error("unsupported event: {}", data)
 	finally:

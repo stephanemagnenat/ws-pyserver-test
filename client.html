@@ -26,7 +26,7 @@
 			;
 
 			// setup renderer state
-			ctx.fillStyle = 'rgb(0,0,0)';
+			ctx.strokeStyle = 'rgb(0,0,0)';
 			ctx.textAlign = "center";
 
 			// render the canvas
@@ -38,10 +38,20 @@
 					ctx.arc(data.pos[0]*2, data.pos[1]*2, 8, 0, 2 * Math.PI);
 					ctx.stroke();
 					ctx.fillText(name, data.pos[0]*2, data.pos[1]*2+20);
+					ctx.fillText(data.hits, data.pos[0]*2, data.pos[1]*2-14);
 					if (lastRenderTimestamp) {
+						// handle animations
 						var deltaTime = (timestamp - lastRenderTimestamp) / 1000.;
 						data.pos[0] += data.speed[0] * deltaTime;
 						data.pos[1] += data.speed[1] * deltaTime;
+						if (data.score_anim && data.score_anim > 0) {
+							ctx.strokeStyle = 'rgb(255,0,0)';
+							ctx.beginPath();
+							ctx.arc(data.pos[0]*2, data.pos[1]*2, 16-data.score_anim*16, 0, 2 * Math.PI);
+							ctx.stroke();
+							ctx.strokeStyle = 'rgb(0,0,0)';
+							data.score_anim -= deltaTime;
+						}
 					}
 				}
 				lastRenderTimestamp = timestamp;
@@ -50,16 +60,27 @@
 
 			connect.onclick = function (event) {
 				websocket = new WebSocket("ws://" + hostinput.value + ":6789/");
+				var name = nameinput.value;
 				websocket.onopen = function (event) {
-					websocket.send(nameinput.value);
+					websocket.send(name);
 				};
 				websocket.onmessage = function (event) {
 					data = JSON.parse(event.data);
 					switch (data.type) {
 						case 'player_new':
 							logArea.textContent += data.name + " connected\n";
+							players[data.name] = { "pos": data.pos, "speed": data.speed, "hits": data.hits };
+							break;
 						case 'player_state':
-							players[data.name] = { "pos": data.pos, "speed": data.speed };
+							var player = players[data.name];
+							// if hits were improved, set animation
+							if (data.hits > player.hits) {
+								players[data.name].score_anim = 1;
+							}
+							// update variables
+							player.pos = data.pos;
+							player.speed = data.speed;
+							player.hits = data.hits;
 							break;
 						case 'player_part':
 							logArea.textContent += data.name + " disconnected\n";
@@ -75,14 +96,17 @@
 				if (event.key === "ArrowRight") {
 					websocket.send(JSON.stringify({action: 'move', speed: [10,0]}));
 				}
-				if (event.key === "ArrowLeft") {
+				else if (event.key === "ArrowLeft") {
 					websocket.send(JSON.stringify({action: 'move', speed: [-10,0]}));
 				}
-				if (event.key === "ArrowUp") {
+				else if (event.key === "ArrowUp") {
 					websocket.send(JSON.stringify({action: 'move', speed: [0,-10]}));
 				}
-				if (event.key === "ArrowDown") {
+				else if (event.key === "ArrowDown") {
 					websocket.send(JSON.stringify({action: 'move', speed: [0,10]}));
+				}
+				else if (event.key === " ") {
+					websocket.send(JSON.stringify({action: 'fire'}));
 				}
 			}
 
