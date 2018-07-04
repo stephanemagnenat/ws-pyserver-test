@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import websockets
+import time
 import numpy as np
 
 # enable logging
@@ -113,13 +114,16 @@ async def process_client(websocket, path):
 ## server-side state update
 
 async def run_state():
+	last_time = time.time()
 	while True:
+		cur_time = time.time()
 		for websocket, player in players.items():
 			#print (player.name)
 			#print (player.pos)
 			#print (player.speed)
-			if player.step(UPDATE_PERIOD):
+			if player.step(cur_time - last_time):
 				await notify_players(player, message_player_status)
+		last_time = cur_time
 		await asyncio.sleep(UPDATE_PERIOD)
 
 ## main code
