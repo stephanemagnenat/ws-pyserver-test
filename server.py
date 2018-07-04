@@ -125,5 +125,5 @@ async def run_state():
 ## main code
 
 loop = asyncio.get_event_loop()
-loop.run_until_complete(websockets.serve(process_client, 'localhost', 6789))
+loop.run_until_complete(websockets.serve(process_client, '', 6789))
 loop.run_until_complete(run_state())
