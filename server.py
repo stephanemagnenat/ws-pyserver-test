@@ -7,97 +7,123 @@ import asyncio
 import json
 import logging
 import websockets
+import numpy as np
 
+# enable logging
 
-class Timer:
-	def __init__(self, timeout, callback, repeat = True):
-		self._timeout = timeout
-		self._callback = callback
-		self._repeat = repeat
-		self._task = asyncio.ensure_future(self._job())
+logging.basicConfig(level=logging.DEBUG)
 
-	async def _job(self):
-		while True:
-			await asyncio.sleep(self._timeout)
-			await self._callback()
-			if not self._repeat:
-				break
+# game classes
 
-	def cancel(self):
-		self._task.cancel()
+class Player:
+	def __init__(self, name):
+		self.name = name
+		self.pos = np.ones(2) * WORLD_SIZE / 2
+		self.hp = MAX_HP
+		self.speed = np.zeros(2)
 
+	def move(self, speed):
+		self.speed = np.array(speed)
 
-logging.basicConfig()
+	def step(self, dt):
+		# return true if clipping occurs
+		self.pos += self.speed * dt
+		new_pos = np.clip(self.pos, 0, WORLD_SIZE)
+		if not np.array_equal(new_pos, self.pos):
+			self.pos = new_pos
+			self.speed[:] = [0,0]
+			return True
+		return False
 
-STATE = {'value': 0}
+# game state
 
-USERS = {}
+players = {}
 
+# game constants
 
-def state_event():
-	return json.dumps({'type': 'state', **STATE})
+UPDATE_PERIOD = 0.05
 
-def message_user_new(name):
-	return json.dumps({'type': 'user_new', 'name': name})
+WORLD_SIZE = 200
 
-def message_user_part(name):
-	return json.dumps({'type': 'user_part', 'name': name})
+MAX_HP = 20
+ATTACK_STRENGTH = 1
 
+# network processing methods
 
-async def notify_state():
-	print(f"- new state {STATE['value']}")
-	if USERS:       # asyncio.wait doesn't accept an empty list
-		message = state_event()
-		await asyncio.wait([user.send(message) for user in USERS])
+## message building
 
-async def notify_user_new(name):
-	if USERS:       # asyncio.wait doesn't accept an empty list
-		message = message_user_new(name)
-		await asyncio.wait([user.send(message) for user in USERS])
+def message_player_new(player):
+	return json.dumps({'type': 'player_new', 'name': player.name, 'pos': player.pos.tolist(), 'speed': player.speed.tolist()})
 
-async def notify_user_part(name):
-	if USERS:       # asyncio.wait doesn't accept an empty list
-		message = message_user_part(name)
-		await asyncio.wait([user.send(message) for user in USERS])
+def message_player_status(player):
+	return json.dumps({'type': 'player_state', 'name': player.name, 'pos': player.pos.tolist(), 'speed': player.speed.tolist()})
 
+def message_player_part(player):
+	return json.dumps({'type': 'player_part', 'name': player.name})
+
+## notification helper methods
+
+async def notify_players(source_player, messager_builder_function):
+	if players:       # asyncio.wait doesn't accept an empty list
+		message = messager_builder_function(source_player)
+		await asyncio.wait([websocket.send(message) for websocket in players])
+
+## network processing callbacks
 
 async def register(websocket):
+	# receive the name from this player
 	name = await websocket.recv()
-	USERS[websocket] = name
+	player = Player(name)
+	# send the current state to this player
+	for other_websocket, other_player in players.items():
+		await websocket.send(message_player_new(other_player))
+	# add to the list of players
+	players[websocket] = player
+	# tell all players about this new one
+	await notify_players(player, message_player_new)
+	# print and return
 	print(f"> {name} connected")
-	await notify_user_new(name)
+	return player
 
 async def unregister(websocket):
-	name = USERS[websocket]
-	del USERS[websocket]
-	print(f"> {name} disconnected")
-	await notify_user_part(name)
+	# remove from the list of players
+	player = players[websocket]
+	del players[websocket]
+	# tell others players about this disconnection
+	await notify_players(player, message_player_part)
+	print(f"> {player.name} disconnected")
 
+## client processing code
 
 async def process_client(websocket, path):
 	# register(websocket) sends user_event() to websocket
-	await register(websocket)
+	player = await register(websocket)
 	try:
-		await websocket.send(state_event())
+		# process messages from this player
 		async for message in websocket:
 			data = json.loads(message)
-			if data['action'] == 'minus':
-				STATE['value'] -= 1
-				await notify_state()
-			elif data['action'] == 'plus':
-				STATE['value'] += 1
-				await notify_state()
+			if data['action'] == 'move':
+				player.move(data['speed'])
+				await notify_players(player, message_player_status)
 			else:
 				logging.error("unsupported event: {}", data)
 	finally:
 		await unregister(websocket)
 
+## server-side state update
 
-async def step_state():
-	STATE['value'] += 1
-	await notify_state()
+async def run_state():
+	while True:
+		for websocket, player in players.items():
+			#print (player.name)
+			#print (player.pos)
+			#print (player.speed)
+			if player.step(UPDATE_PERIOD):
+				await notify_players(player, message_player_status)
+		await asyncio.sleep(UPDATE_PERIOD)
 
+## main code
 
-timer = Timer(1, step_state)
-asyncio.get_event_loop().run_until_complete(websockets.serve(process_client, 'localhost', 6789))
-asyncio.get_event_loop().run_forever()
+loop = asyncio.get_event_loop()
+loop.run_until_complete(websockets.serve(process_client, 'localhost', 6789))
+loop.run_until_complete(run_state())

@@ -7,59 +7,87 @@
 	</head>
 	<body>
 		<form>
+			Host: <input type="text" id="hostinput" value="localhost">
 			Name: <input type="text" id="nameinput">
 		</form>
-		<div class="buttons">
-			<div class="connect button">Connect</div>
-			<div class="minus button">-</div>
-			<div class="value">?</div>
-			<div class="plus button">+</div>
-		</div>
-		<div class="state">
-			User activity:
-			<div class="users"></div>
-		</div>
+		<div class="connect button">Connect</div>
+		<canvas id="myCanvas" width="400" height="400"></canvas>
+		<textarea id="logArea" rows="10" cols="80"></textarea>
 		<script>
 			var connect = document.querySelector('.connect'),
-				minus = document.querySelector('.minus'),
-				plus = document.querySelector('.plus'),
-				value = document.querySelector('.value'),
-				users = document.querySelector('.users'),
+				hostinput = document.getElementById('hostinput'),
 				nameinput = document.getElementById('nameinput'),
-				websocket = null
+				canvas = document.getElementById("myCanvas"),
+				ctx = canvas.getContext("2d"),
+				logArea = document.getElementById('logArea'),
+				players = {},
+				websocket = null,
+				lastRenderTimestamp = null
 			;
-			
+
+			// setup renderer state
+			ctx.fillStyle = 'rgb(0,0,0)';
+			ctx.textAlign = "center";
+
+			// render the canvas
+			function render(timestamp) {
+				// draw animation and update movements
+				ctx.clearRect(0, 0, canvas.width, canvas.height);
+				for (const [name, data] of Object.entries(players)) {
+					ctx.beginPath();
+					ctx.arc(data.pos[0]*2, data.pos[1]*2, 8, 0, 2 * Math.PI);
+					ctx.stroke();
+					ctx.fillText(name, data.pos[0]*2, data.pos[1]*2+20);
+					if (lastRenderTimestamp) {
+						var deltaTime = (timestamp - lastRenderTimestamp) / 1000.;
+						data.pos[0] += data.speed[0] * deltaTime;
+						data.pos[1] += data.speed[1] * deltaTime;
+					}
+				}
+				lastRenderTimestamp = timestamp;
+				window.requestAnimationFrame(render);
+			}
+
 			connect.onclick = function (event) {
-				websocket = new WebSocket("ws://127.0.0.1:6789/");
+				websocket = new WebSocket("ws://" + hostinput.value + ":6789/");
 				websocket.onopen = function (event) {
 					websocket.send(nameinput.value);
 				};
 				websocket.onmessage = function (event) {
 					data = JSON.parse(event.data);
 					switch (data.type) {
-						case 'state':
-							value.textContent = data.value;
+						case 'player_new':
+							logArea.textContent += data.name + " connected\n";
+						case 'player_state':
+							players[data.name] = { "pos": data.pos, "speed": data.speed };
 							break;
-						case 'user_new':
-							users.textContent += data.name + " connected\n";
-							break;
-						case 'user_part':
-							users.textContent += data.name + " disconnected\n";
+						case 'player_part':
+							logArea.textContent += data.name + " disconnected\n";
+							delete players[data.name];
 							break;
 						default:
 							console.error("unsupported event", data);
 					}
 				};
 			};
-			
-			minus.onclick = function (event) {
-				websocket.send(JSON.stringify({action: 'minus'}));
-			};
-			
-			plus.onclick = function (event) {
-				websocket.send(JSON.stringify({action: 'plus'}));
-			};
-			
+
+			document.onkeydown = function (event) {
+				if (event.key === "ArrowRight") {
+					websocket.send(JSON.stringify({action: 'move', speed: [10,0]}));
+				}
+				if (event.key === "ArrowLeft") {
+					websocket.send(JSON.stringify({action: 'move', speed: [-10,0]}));
+				}
+				if (event.key === "ArrowUp") {
+					websocket.send(JSON.stringify({action: 'move', speed: [0,-10]}));
+				}
+				if (event.key === "ArrowDown") {
+					websocket.send(JSON.stringify({action: 'move', speed: [0,10]}));
+				}
+			}
+
+			window.requestAnimationFrame(render);
+
 		</script>
 	</body>
 </html>
