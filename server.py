@@ -8,6 +8,25 @@ import json
 import logging
 import websockets
 
+
+class Timer:
+	def __init__(self, timeout, callback, repeat = True):
+		self._timeout = timeout
+		self._callback = callback
+		self._repeat = repeat
+		self._task = asyncio.ensure_future(self._job())
+
+	async def _job(self):
+		while True:
+			await asyncio.sleep(self._timeout)
+			await self._callback()
+			if not self._repeat:
+				break
+
+	def cancel(self):
+		self._task.cancel()
+
+
 logging.basicConfig()
 
 STATE = {'value': 0}
@@ -55,7 +74,7 @@ async def unregister(websocket):
 	await notify_user_part(name)
 
 
-async def counter(websocket, path):
+async def process_client(websocket, path):
 	# register(websocket) sends user_event() to websocket
 	await register(websocket)
 	try:
@@ -73,5 +92,12 @@ async def counter(websocket, path):
 	finally:
 		await unregister(websocket)
 
-asyncio.get_event_loop().run_until_complete(websockets.serve(counter, 'localhost', 6789))
+
+async def step_state():
+	STATE['value'] += 1
+	await notify_state()
+
+
+timer = Timer(1, step_state)
+asyncio.get_event_loop().run_until_complete(websockets.serve(process_client, 'localhost', 6789))
 asyncio.get_event_loop().run_forever()
