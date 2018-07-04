@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<!-- inspired from https://websockets.readthedocs.io/en/stable/intro.html -->
+<html>
+	<head>
+		<meta charset="UTF-8"> 
+		<title>WebSocket demo</title>
+	</head>
+	<body>
+		<form>
+			Name: <input type="text" id="nameinput">
+		</form>
+		<div class="buttons">
+			<div class="connect button">Connect</div>
+			<div class="minus button">-</div>
+			<div class="value">?</div>
+			<div class="plus button">+</div>
+		</div>
+		<div class="state">
+			User activity:
+			<div class="users"></div>
+		</div>
+		<script>
+			var connect = document.querySelector('.connect'),
+				minus = document.querySelector('.minus'),
+				plus = document.querySelector('.plus'),
+				value = document.querySelector('.value'),
+				users = document.querySelector('.users'),
+				nameinput = document.getElementById('nameinput'),
+				websocket = null
+			;
+			
+			connect.onclick = function (event) {
+				websocket = new WebSocket("ws://127.0.0.1:6789/");
+				websocket.onopen = function (event) {
+					websocket.send(nameinput.value);
+				};
+				websocket.onmessage = function (event) {
+					data = JSON.parse(event.data);
+					switch (data.type) {
+						case 'state':
+							value.textContent = data.value;
+							break;
+						case 'user_new':
+							users.textContent += data.name + " connected\n";
+							break;
+						case 'user_part':
+							users.textContent += data.name + " disconnected\n";
+							break;
+						default:
+							console.error("unsupported event", data);
+					}
+				};
+			};
+			
+			minus.onclick = function (event) {
+				websocket.send(JSON.stringify({action: 'minus'}));
+			};
+			
+			plus.onclick = function (event) {
+				websocket.send(JSON.stringify({action: 'plus'}));
+			};
+			
+		</script>
+	</body>
+</html>
